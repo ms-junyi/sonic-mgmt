@@ -38,6 +38,7 @@ SAI_TEST_CONTAINER_WARM_UP_IN_SEC = 5
 IS_TEST_ENV_FAILED = False
 WARM_TEST_DIR = "warm_boot"
 WARM_TEST_ARGS = ";test_reboot_mode='warm'"
+
 SONIC_SSH_PORT = 22
 SONIC_SSH_REGEX = 'OpenSSH_[\\w\\.]+ Debian'
 COMMON_CONFIG_FORMAT = ';common_configured=\'{}\''
@@ -101,6 +102,14 @@ def pytest_addoption(parser):
     parser.addoption("--enable_warmboot_test", action="store_true",
                      default=False,
                      help="Trigger WARMBOOT test. If enable WARMBOOT \
+                     testing or not, true or false.")
+    parser.addoption("--enable_t0_warmboot_test", action="store_true",
+                     default=False,
+                     help="Trigger T0-WARMBOOT test. If enable WARMBOOT \
+                     testing or not, true or false.")
+    parser.addoption("--enable_ptf_warmboot_test", action="store_true",
+                     default=False,
+                     help="Trigger PTF-SAI-WARMBOOT test. If enable WARMBOOT \
                      testing or not, true or false.")
     parser.addoption("--enable_sai_test", action="store_true",
                      help="Trigger SAI test. If enable SAI T0 \
@@ -245,7 +254,9 @@ def prepare_sai_test_container(duthost, creds, container_name, request):
         logger.info("Prepare saiserver with command: {}".format(cmd))
         duthost.shell(cmd)
         # Prepare warmboot
-        if request.config.option.enable_warmboot_test:
+        if (request.config.option.enable_warmboot_test or
+           request.config.option.enable_t0_warmboot_test or
+           request.config.option.enable_ptf_warmboot_test):
             saiserver_warmboot_config(duthost, "init")
             duthost.shell(USR_BIN_DIR + "/" + container_name + ".sh" + " stop")
             duthost.shell(
@@ -267,7 +278,9 @@ def revert_sai_test_container(duthost, creds, container_name, request):
         __restore_default_syncd(duthost, creds)
     else:
         # Prepare warmboot
-        if request.config.option.enable_warmboot_test:
+        if (request.config.option.enable_warmboot_test or
+           request.config.option.enable_t0_warmboot_test or
+           request.config.option.enable_ptf_warmboot_test):
             saiserver_warmboot_config(duthost, "restore")
         __remove_saiserver_deploy(duthost, creds, request)
 
@@ -295,6 +308,8 @@ def get_sai_thrift_version(request):
     In current implementation, it will use v2 saithrift when:
         enable_ptf_sai_test
         enable_warmboot_test
+        enable_t0_warmboot_test
+        enable_ptf_warmboot_test
         enable_sai_test
 
     Args:
@@ -302,6 +317,8 @@ def get_sai_thrift_version(request):
     """
     if request.config.option.enable_ptf_sai_test \
        or request.config.option.enable_warmboot_test \
+       or request.config.option.enable_t0_warmboot_test \
+       or request.config.option.enable_ptf_warmboot_test \
        or request.config.option.enable_sai_test:
         return "v2"
     else:
@@ -354,6 +371,7 @@ def stop_and_rm_sai_test_container(duthost, container_name):
         container_name: The container name for sai testing on DUT.
     """
     logger.info("Stopping the container '{}'...".format(container_name))
+    # duthost.shell("docker stop " + container_name)
     duthost.shell(USR_BIN_DIR + "/" + container_name + ".sh" + " stop")
     duthost.delete_container(container_name)
 
@@ -507,7 +525,7 @@ def __deploy_syncd_rpc_as_syncd(duthost, creds):
 
     logger.info("Swapping docker container from image: \
         [{}] to [{}] ...".format(
-        docker_rpc_image, docker_syncd_name))
+            docker_rpc_image, docker_syncd_name))
     tag_image(
         duthost,
         "{}:latest".format(docker_syncd_name),
@@ -623,13 +641,32 @@ def saiserver_warmboot_config(duthost, operation):
     """
     Saiserver warmboot mode.
     Change the sai.profile
+
         Args:
-            duthost (AnsibleHost): device under test
-            operation: init|start|restore
+        duthost (AnsibleHost): device under test
+        operation: init|start|restore
     """
     logger.info("config warmboot {}".format(operation))
     duthost.command(
         "{}/{} -o {}".format(USR_BIN_DIR, WARMBOOT_PROFILE_SCRIPT, operation)
+    )
+
+
+def __copy_sai_profile_into_saiserver_docker(duthost):
+    """
+    Copy the script for prepare the
+    sai.profile into saiserver docker
+
+        Args:
+        duthost (AnsibleHost): device under test
+    """
+    duthost.command(
+        "docker cp {}/{} {}:{}".format(
+            USR_BIN_DIR,
+            WARMBOOT_PROFILE_SCRIPT,
+            SAISERVER_CONTAINER,
+            USR_BIN_DIR),
+        module_ignore_errors=True
     )
 
 
